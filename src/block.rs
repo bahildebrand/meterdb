@@ -1,12 +1,10 @@
-use crate::block::{
-    body::{BlockBodyError, BlockEntry},
-    header::Header,
-};
+use crate::block::header::{HEADER_LEN, Header};
 
 mod body;
 mod header;
 
 pub use body::BlockValue;
+pub(crate) use body::{BlockBodyError, BlockEntry};
 use thiserror::Error;
 
 pub(crate) struct Block<const N: usize> {
@@ -24,23 +22,30 @@ impl<const N: usize> Block<N> {
         }
     }
 
-    pub(crate) fn add_reading<T: Into<BlockValue>>(
-        &mut self,
-        key: &str,
-        val: T,
-    ) -> Result<(), BlockError> {
-        let block_entry = BlockEntry::new(key, val)?;
+    pub(crate) fn add_reading(&mut self, block_entry: &BlockEntry) -> Result<(), BlockError> {
         let header_len = self.header.len as usize;
         if header_len + block_entry.size() > N {
-            // TODO: implement block swapping/writing
             return Err(BlockError::BlockFull);
         }
 
-        self.header.len += block_entry.size() as u32;
         self.mem[header_len..(header_len + block_entry.size())]
             .copy_from_slice(block_entry.as_bytes());
+        self.header.len += block_entry.size() as u32;
 
         Ok(())
+    }
+
+    pub(crate) fn write_header(&mut self) {
+        self.mem[0..HEADER_LEN].copy_from_slice(self.header.as_bytes().as_ref());
+    }
+
+    pub(crate) fn as_bytes(&self) -> &[u8] {
+        &self.mem
+    }
+
+    pub(crate) fn reset(&mut self) {
+        self.header = Header::default();
+        self.mem.fill(0xFF);
     }
 }
 
@@ -66,8 +71,9 @@ mod test {
 
         let key = "test";
         let test_val = 42u32;
+        let block_entry = BlockEntry::new(key, test_val).unwrap();
 
-        block.add_reading(key, test_val).unwrap();
+        block.add_reading(&block_entry).unwrap();
 
         let block_entry = BlockEntry::new(key, test_val).unwrap();
         let expected_size = block_entry.size() + HEADER_LEN;
@@ -82,7 +88,8 @@ mod test {
         let test_val = 42u32;
 
         // Try to add one more entry and check for overflow
-        let result = block.add_reading(key, test_val);
+        let block_entry = BlockEntry::new(key, test_val).unwrap();
+        let result = block.add_reading(&block_entry);
         assert!(result.is_err());
     }
 }

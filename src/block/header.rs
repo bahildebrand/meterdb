@@ -20,22 +20,6 @@ pub(crate) struct Header {
 }
 
 impl Header {
-    pub(crate) fn new(seq: u16, len: u32, crc32: u32) -> Self {
-        Header {
-            magic: MAGIC,
-            version: VERSION,
-            flags: Flags::InUse.into(),
-            _reserved: 0,
-            seq,
-            len,
-            crc32,
-        }
-    }
-
-    pub(crate) fn size() -> usize {
-        HEADER_LEN
-    }
-
     pub(crate) fn as_bytes(&self) -> Bytes {
         let mut header_bytes = BytesMut::with_capacity(HEADER_LEN);
 
@@ -137,7 +121,12 @@ mod tests {
             0x00, 0x01, 0xE2, 0x40, // crc32
         ];
 
-        let header = Header::new(1, 1024, 123456);
+        let header = Header {
+            seq: 1,
+            len: 1024,
+            crc32: 123456,
+            ..Default::default()
+        };
         let bytes = header.as_bytes();
         assert_eq!(bytes.len(), HEADER_LEN);
         assert_eq!(bytes.as_ref(), &expected);
