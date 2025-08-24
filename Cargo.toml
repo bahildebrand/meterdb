@@ -1,0 +1,11 @@
+[package]
+name = "timmydb"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bytes = { version = "1.10.1", default-features = false }
+crc-any = "2.5.0"
+
+[dev-dependencies]
+rstest = { version = "0.26.1", default-features = false }
