@@ -1,10 +1,9 @@
-use crate::block::{
-    body::{BlockEntry, BlockValue},
-    header::Header,
-};
+use crate::block::{body::BlockEntry, header::Header};
 
 mod body;
 mod header;
+
+pub use body::BlockValue;
 
 pub(crate) struct Block<const N: usize> {
     header: Header,

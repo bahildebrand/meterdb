@@ -52,7 +52,7 @@ impl BlockEntry {
     }
 }
 
-pub(crate) enum BlockValue {
+pub enum BlockValue {
     UnsignedInt(u32),
 }
 
