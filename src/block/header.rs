@@ -1,4 +1,4 @@
-use bytes::{BufMut, Bytes, BytesMut};
+use heapless::{CapacityError, Vec};
 use thiserror::Error;
 
 const MAGIC: u16 = 0xBEEF;
@@ -20,18 +20,18 @@ pub(crate) struct Header {
 }
 
 impl Header {
-    pub(crate) fn as_bytes(&self) -> Bytes {
-        let mut header_bytes = BytesMut::with_capacity(HEADER_LEN);
+    pub(crate) fn as_bytes(&self) -> Result<Vec<u8, HEADER_LEN>, HeaderError> {
+        let mut header_bytes = Vec::new();
 
-        header_bytes.put(self.magic.to_be_bytes().as_slice());
-        header_bytes.put(self.version.to_be_bytes().as_slice());
-        header_bytes.put(self.flags.to_be_bytes().as_slice());
-        header_bytes.put(self._reserved.to_be_bytes().as_slice());
-        header_bytes.put(self.seq.to_be_bytes().as_slice());
-        header_bytes.put(self.len.to_be_bytes().as_slice());
-        header_bytes.put(self.crc32.to_be_bytes().as_slice());
+        header_bytes.extend_from_slice(self.magic.to_be_bytes().as_slice())?;
+        header_bytes.extend_from_slice(self.version.to_be_bytes().as_slice())?;
+        header_bytes.extend_from_slice(self.flags.to_be_bytes().as_slice())?;
+        header_bytes.extend_from_slice(self._reserved.to_be_bytes().as_slice())?;
+        header_bytes.extend_from_slice(self.seq.to_be_bytes().as_slice())?;
+        header_bytes.extend_from_slice(self.len.to_be_bytes().as_slice())?;
+        header_bytes.extend_from_slice(self.crc32.to_be_bytes().as_slice())?;
 
-        header_bytes.freeze()
+        Ok(header_bytes)
     }
 }
 
@@ -67,7 +67,6 @@ impl From<Flags> for u8 {
 }
 
 impl TryFrom<u8> for Flags {
-    // TODO: Actual error type
     type Error = HeaderError;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
@@ -80,10 +79,12 @@ impl TryFrom<u8> for Flags {
     }
 }
 
-#[derive(Error, Debug, PartialEq, Eq)]
+#[derive(Error, Debug)]
 pub enum HeaderError {
     #[error("invalid flags: {}", .0)]
     InvalidFlags(u8),
+    #[error("not enough capacity for header")]
+    HeaderCapacity(#[from] CapacityError),
 }
 
 #[cfg(test)]
@@ -93,12 +94,20 @@ mod tests {
     use rstest::rstest;
 
     #[rstest]
-    #[case(Ok(Flags::Erased), ERASED_FLAGS)]
-    #[case(Ok(Flags::InUse), IN_USE_FLAGS)]
-    #[case(Ok(Flags::Dirty), DIRTY_FLAGS)]
-    #[case(Err(HeaderError::InvalidFlags(0x0)), 0x0)]
-    fn test_int_to_flags(#[case] flags: Result<Flags, HeaderError>, #[case] flags_raw: u8) {
-        assert_eq!(Flags::try_from(flags_raw), flags);
+    #[case(Flags::Erased, ERASED_FLAGS)]
+    #[case(Flags::InUse, IN_USE_FLAGS)]
+    #[case(Flags::Dirty, DIRTY_FLAGS)]
+    fn test_int_to_flags(#[case] flags: Flags, #[case] flags_raw: u8) {
+        assert_eq!(Flags::try_from(flags_raw).unwrap(), flags);
+    }
+
+    #[test]
+    fn test_int_to_flags_failure() {
+        for flags_raw in 0..=255 {
+            if flags_raw != ERASED_FLAGS && flags_raw != IN_USE_FLAGS && flags_raw != DIRTY_FLAGS {
+                assert!(Flags::try_from(flags_raw).is_err());
+            }
+        }
     }
 
     #[rstest]
@@ -127,8 +136,8 @@ mod tests {
             crc32: 123456,
             ..Default::default()
         };
-        let bytes = header.as_bytes();
+        let bytes = header.as_bytes().unwrap();
         assert_eq!(bytes.len(), HEADER_LEN);
-        assert_eq!(bytes.as_ref(), &expected);
+        assert_eq!(bytes.as_slice(), &expected);
     }
 }

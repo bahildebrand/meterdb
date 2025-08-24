@@ -28,7 +28,7 @@ impl<const N: usize, W: DbWriter> Db<N, W> {
     }
 
     pub fn flush(&mut self) -> Result<(), DbError> {
-        self.cur_block.write_header();
+        self.cur_block.write_header()?;
         self.writer.write_block(self.cur_block.as_bytes())?;
         self.cur_block.reset();
 

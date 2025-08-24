@@ -9,18 +9,22 @@
 //! |   2 bytes  | variable |  2 bytes  | variable |
 //! +------------+----------+-----------+----------+
 
-use bytes::{BufMut, Bytes, BytesMut};
+use heapless::{CapacityError, Vec};
 use thiserror::Error;
 
 const MAX_KEY_SIZE: usize = 64;
+// TODO: this should be dynamic when new type support added
+const MAX_VAL_SIZE: usize = 4;
 
 pub(crate) struct BlockEntry {
-    bytes: Bytes,
+    bytes: Vec<u8, { Self::MAX_ENTRY_SIZE }>,
 }
 
 impl BlockEntry {
     const KEY_LEN_SIZE: usize = 2;
     const VAL_TYPE_SIZE: usize = 2;
+    const MAX_ENTRY_SIZE: usize =
+        MAX_KEY_SIZE + MAX_VAL_SIZE + Self::KEY_LEN_SIZE + Self::VAL_TYPE_SIZE;
 
     pub(crate) fn new<T: Into<BlockValue>>(key_str: &str, val: T) -> Result<Self, BlockBodyError> {
         let key_len = key_str.as_bytes().len();
@@ -31,17 +35,15 @@ impl BlockEntry {
         let block_val = val.into();
         let block_size = Self::KEY_LEN_SIZE + Self::VAL_TYPE_SIZE + key_len + block_val.size();
         let type_len = TypeLen::from(&block_val);
-        let mut entry_bytes = BytesMut::with_capacity(block_size);
+        let mut bytes = Vec::new();
 
         // cast to u16 is safe here, as we verified max key size above
-        entry_bytes.put((block_size as u16).to_be_bytes().as_slice());
-        entry_bytes.put(key_str.as_bytes());
-        entry_bytes.put(type_len.as_bytes().as_slice());
-        entry_bytes.put(block_val.as_bytes().as_slice());
+        bytes.extend_from_slice((block_size as u16).to_be_bytes().as_slice())?;
+        bytes.extend_from_slice(key_str.as_bytes())?;
+        bytes.extend_from_slice(type_len.as_bytes().as_slice())?;
+        bytes.extend_from_slice(block_val.as_bytes().as_slice())?;
 
-        Ok(Self {
-            bytes: entry_bytes.freeze(),
-        })
+        Ok(Self { bytes })
     }
 
     pub(crate) fn size(&self) -> usize {
@@ -108,6 +110,8 @@ impl From<&BlockValue> for TypeLen {
 pub enum BlockBodyError {
     #[error("block entry key too large")]
     KeyTooLarge,
+    #[error("not enough capacity for block entry: {}", .0)]
+    Capacity(#[from] CapacityError),
 }
 
 #[cfg(test)]
