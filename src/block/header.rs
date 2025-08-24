@@ -31,6 +31,10 @@ impl Header {
         }
     }
 
+    pub(crate) fn len() -> usize {
+        HEADER_LEN
+    }
+
     pub(crate) fn as_bytes(&self) -> Bytes {
         let mut header_bytes = BytesMut::with_capacity(HEADER_LEN);
 

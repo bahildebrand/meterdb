@@ -8,4 +8,5 @@ bytes = { version = "1.10.1", default-features = false }
 crc-any = "2.5.0"
 
 [dev-dependencies]
+insta = "1.43.1"
 rstest = { version = "0.26.1", default-features = false }
