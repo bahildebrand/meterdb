@@ -2,7 +2,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 
 const MAGIC: u16 = 0xBEEF;
 const VERSION: u8 = 0;
-const HEADER_LEN: usize = 16;
+pub(crate) const HEADER_LEN: usize = 16;
 
 const ERASED_FLAGS: u8 = 0xFF;
 const IN_USE_FLAGS: u8 = 0xFE;
@@ -14,7 +14,7 @@ pub(crate) struct Header {
     flags: u8,
     _reserved: u16,
     seq: u16,
-    len: u32,
+    pub len: u32,
     crc32: u32,
 }
 
@@ -31,7 +31,7 @@ impl Header {
         }
     }
 
-    pub(crate) fn len() -> usize {
+    pub(crate) fn size() -> usize {
         HEADER_LEN
     }
 
@@ -47,6 +47,20 @@ impl Header {
         header_bytes.put(self.crc32.to_be_bytes().as_slice());
 
         header_bytes.freeze()
+    }
+}
+
+impl Default for Header {
+    fn default() -> Self {
+        Self {
+            magic: MAGIC,
+            version: VERSION,
+            flags: IN_USE_FLAGS,
+            _reserved: 0,
+            seq: 0,
+            len: HEADER_LEN as u32,
+            crc32: 0,
+        }
     }
 }
 
