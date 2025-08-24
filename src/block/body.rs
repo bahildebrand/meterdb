@@ -10,6 +10,7 @@
 //! +------------+----------+-----------+----------+
 
 use bytes::{BufMut, Bytes, BytesMut};
+use thiserror::Error;
 
 const MAX_KEY_SIZE: usize = 64;
 
@@ -21,10 +22,10 @@ impl BlockEntry {
     const KEY_LEN_SIZE: usize = 2;
     const VAL_TYPE_SIZE: usize = 2;
 
-    pub(crate) fn new<T: Into<BlockValue>>(key_str: &str, val: T) -> Result<Self, ()> {
+    pub(crate) fn new<T: Into<BlockValue>>(key_str: &str, val: T) -> Result<Self, BlockBodyError> {
         let key_len = key_str.as_bytes().len();
         if key_len > MAX_KEY_SIZE {
-            return Err(());
+            return Err(BlockBodyError::KeyTooLarge);
         }
 
         let block_val = val.into();
@@ -101,6 +102,12 @@ impl From<&BlockValue> for TypeLen {
             size: value.size() as u8,
         }
     }
+}
+
+#[derive(Error, Debug)]
+pub enum BlockBodyError {
+    #[error("block entry key too large")]
+    KeyTooLarge,
 }
 
 #[cfg(test)]

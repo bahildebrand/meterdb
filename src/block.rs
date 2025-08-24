@@ -1,9 +1,13 @@
-use crate::block::{body::BlockEntry, header::Header};
+use crate::block::{
+    body::{BlockBodyError, BlockEntry},
+    header::Header,
+};
 
 mod body;
 mod header;
 
 pub use body::BlockValue;
+use thiserror::Error;
 
 pub(crate) struct Block<const N: usize> {
     header: Header,
@@ -20,12 +24,16 @@ impl<const N: usize> Block<N> {
         }
     }
 
-    pub(crate) fn add_reading<T: Into<BlockValue>>(&mut self, key: &str, val: T) -> Result<(), ()> {
+    pub(crate) fn add_reading<T: Into<BlockValue>>(
+        &mut self,
+        key: &str,
+        val: T,
+    ) -> Result<(), BlockError> {
         let block_entry = BlockEntry::new(key, val)?;
         let header_len = self.header.len as usize;
         if header_len + block_entry.size() > N {
             // TODO: implement block swapping/writing
-            return Err(());
+            return Err(BlockError::BlockFull);
         }
 
         self.header.len += block_entry.size() as u32;
@@ -34,6 +42,14 @@ impl<const N: usize> Block<N> {
 
         Ok(())
     }
+}
+
+#[derive(Error, Debug)]
+pub enum BlockError {
+    #[error("block has no room to insert key")]
+    BlockFull,
+    #[error(transparent)]
+    Body(#[from] BlockBodyError),
 }
 
 #[cfg(test)]

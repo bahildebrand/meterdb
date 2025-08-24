@@ -1,4 +1,5 @@
 use bytes::{BufMut, Bytes, BytesMut};
+use thiserror::Error;
 
 const MAGIC: u16 = 0xBEEF;
 const VERSION: u8 = 0;
@@ -83,16 +84,22 @@ impl From<Flags> for u8 {
 
 impl TryFrom<u8> for Flags {
     // TODO: Actual error type
-    type Error = ();
+    type Error = HeaderError;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             ERASED_FLAGS => Ok(Flags::Erased),
             IN_USE_FLAGS => Ok(Flags::InUse),
             DIRTY_FLAGS => Ok(Flags::Dirty),
-            _ => Err(()),
+            _ => Err(HeaderError::InvalidFlags(value)),
         }
     }
+}
+
+#[derive(Error, Debug, PartialEq, Eq)]
+pub enum HeaderError {
+    #[error("invalid flags: {}", .0)]
+    InvalidFlags(u8),
 }
 
 #[cfg(test)]
@@ -105,8 +112,8 @@ mod tests {
     #[case(Ok(Flags::Erased), ERASED_FLAGS)]
     #[case(Ok(Flags::InUse), IN_USE_FLAGS)]
     #[case(Ok(Flags::Dirty), DIRTY_FLAGS)]
-    #[case(Err(()), 0x0)]
-    fn test_int_to_flags(#[case] flags: Result<Flags, ()>, #[case] flags_raw: u8) {
+    #[case(Err(HeaderError::InvalidFlags(0x0)), 0x0)]
+    fn test_int_to_flags(#[case] flags: Result<Flags, HeaderError>, #[case] flags_raw: u8) {
         assert_eq!(Flags::try_from(flags_raw), flags);
     }
 
