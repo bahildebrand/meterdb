@@ -1,0 +1,6 @@
+---
+source: src/db.rs
+expression: all_blocks
+extension: bin
+snapshot_kind: binary
+---

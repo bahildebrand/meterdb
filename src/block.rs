@@ -1,11 +1,16 @@
+use thiserror::Error;
+
 use crate::block::header::{HEADER_LEN, Header, HeaderError};
 
 mod body;
 mod header;
+mod time;
 
 pub use body::BlockValue;
 pub(crate) use body::{BlockBodyError, BlockEntry};
-use thiserror::Error;
+#[cfg(any(feature = "std", test))]
+pub use time::StdTimestamp;
+pub use time::Timestamp;
 
 pub(crate) struct Block<const N: usize> {
     header: Header,
@@ -63,6 +68,8 @@ pub enum BlockError {
 
 #[cfg(test)]
 mod test {
+    use chrono::{TimeZone, Utc};
+
     use crate::block::header::HEADER_LEN;
 
     use super::*;
@@ -75,11 +82,13 @@ mod test {
 
         let key = "test";
         let test_val = 42u32;
-        let block_entry = BlockEntry::new(key, test_val).unwrap();
+        let date_time = Utc.with_ymd_and_hms(2020, 2, 1, 0, 0, 0).unwrap();
+        let block_entry = BlockEntry::new(key, test_val, date_time).unwrap();
 
         block.add_reading(&block_entry).unwrap();
 
-        let block_entry = BlockEntry::new(key, test_val).unwrap();
+        let date_time = Utc.with_ymd_and_hms(2020, 2, 1, 0, 0, 1).unwrap();
+        let block_entry = BlockEntry::new(key, test_val, date_time).unwrap();
         let expected_size = block_entry.size() + HEADER_LEN;
         assert_eq!(block.header.len as usize, expected_size);
     }
@@ -92,7 +101,8 @@ mod test {
         let test_val = 42u32;
 
         // Try to add one more entry and check for overflow
-        let block_entry = BlockEntry::new(key, test_val).unwrap();
+        let date_time = Utc.with_ymd_and_hms(2020, 2, 1, 0, 0, 1).unwrap();
+        let block_entry = BlockEntry::new(key, test_val, date_time).unwrap();
         let result = block.add_reading(&block_entry);
         assert!(result.is_err());
     }
