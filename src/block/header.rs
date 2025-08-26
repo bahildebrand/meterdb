@@ -1,3 +1,4 @@
+use crc_any::CRCu32;
 use heapless::{CapacityError, Vec};
 use thiserror::Error;
 
@@ -32,6 +33,12 @@ impl Header {
         header_bytes.extend_from_slice(self.crc32.to_be_bytes().as_slice())?;
 
         Ok(header_bytes)
+    }
+
+    pub(crate) fn calc_crc(&mut self, bytes: &[u8]) {
+        let mut crc32 = CRCu32::crc32d();
+        crc32.digest(bytes);
+        self.crc32 = crc32.get_crc();
     }
 }
 
@@ -139,5 +146,13 @@ mod tests {
         let bytes = header.as_bytes().unwrap();
         assert_eq!(bytes.len(), HEADER_LEN);
         assert_eq!(bytes.as_slice(), &expected);
+    }
+
+    #[test]
+    fn test_crc32() {
+        let mut header = Header::default();
+        let data = b"hello world";
+        header.calc_crc(data);
+        assert_eq!(header.crc32, 0x56C8F614);
     }
 }

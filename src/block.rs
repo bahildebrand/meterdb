@@ -41,6 +41,7 @@ impl<const N: usize> Block<N> {
     }
 
     pub(crate) fn write_header(&mut self) -> Result<(), BlockError> {
+        self.header.calc_crc(&self.mem[HEADER_LEN..]);
         self.mem[0..HEADER_LEN].copy_from_slice(self.header.as_bytes()?.as_ref());
 
         Ok(())

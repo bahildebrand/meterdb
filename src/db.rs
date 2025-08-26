@@ -172,7 +172,6 @@ mod test {
 
             for block in &self.blocks {
                 all_blocks.extend_from_slice(block.as_slice());
-                println!("{:?}", block);
             }
 
             all_blocks
@@ -181,7 +180,6 @@ mod test {
         fn write_block(&mut self, block: &[u8]) -> Result<(), DbError> {
             let cur_block = &mut self.blocks[self.cur_block];
             self.cur_block += 1;
-            println!("{:?}", block);
 
             cur_block.copy_from_slice(block);
 
