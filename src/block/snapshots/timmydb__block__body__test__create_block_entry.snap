@@ -1,6 +1,0 @@
----
-source: src/block/body.rs
-expression: entry_bytes
-extension: bin
-snapshot_kind: binary
----
