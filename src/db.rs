@@ -1,28 +1,38 @@
-use core::ops::AddAssign;
+use core::{marker::PhantomData, ops::AddAssign};
 
 use thiserror::Error;
 
 use crate::{
     Timestamp,
     block::{Block, BlockBodyError, BlockEntry, BlockError, BlockValue},
+    storage::{Storage, StorageBlock, StorageError},
 };
 
-pub struct Db<const N: usize, W: DbWriter, T: Timestamp> {
+pub struct Db<const N: usize, S, T, I>
+where
+    S: Storage<N, I>,
+    T: Timestamp,
+    I: Iterator<Item = StorageBlock<N>>,
+{
     cur_block: Block<N>,
-    writer: W,
+    storage: S,
     timestamp_provider: T,
     seq: Sequence,
+    _phantom: PhantomData<I>,
 }
 
-impl<const N: usize, W: DbWriter, T: Timestamp> Db<N, W, T> {
-    pub fn new(writer: W, timestamp_provider: T) -> Db<N, W, T> {
+impl<const N: usize, T: Timestamp, I: Iterator<Item = StorageBlock<N>>, S: Storage<N, I>>
+    Db<N, S, T, I>
+{
+    pub fn new(storage: S, timestamp_provider: T) -> Db<N, S, T, I> {
         let cur_block = Block::new();
 
         Self {
             cur_block,
-            writer,
+            storage,
             timestamp_provider,
             seq: Sequence::from(0),
+            _phantom: PhantomData,
         }
     }
 
@@ -42,16 +52,12 @@ impl<const N: usize, W: DbWriter, T: Timestamp> Db<N, W, T> {
 
     pub fn flush(&mut self) -> Result<(), DbError> {
         self.cur_block.write_header(self.seq.0)?;
-        self.writer.write_block(self.cur_block.as_bytes())?;
+        self.storage.write_block(self.cur_block.as_bytes())?;
         self.cur_block.reset();
         self.seq += 1;
 
         Ok(())
     }
-}
-
-pub trait DbWriter {
-    fn write_block(&mut self, block: &[u8]) -> Result<(), DbError>;
 }
 
 struct Sequence(u16);
@@ -83,6 +89,8 @@ pub enum DbError {
     Block(#[from] BlockError),
     #[error(transparent)]
     Body(#[from] BlockBodyError),
+    #[error(transparent)]
+    Storage(#[from] StorageError),
     #[error("failed to write key")]
     KeyWrite,
     #[error("Failed to write block")]
@@ -99,8 +107,8 @@ mod test {
     use super::*;
 
     use std::sync::{Arc, Mutex};
+    use std::vec;
     use std::vec::Vec;
-    use std::{println, vec};
 
     #[test]
     fn test_block_write_and_flush() {
@@ -108,9 +116,9 @@ mod test {
 
         let storage = TestBlockStorage::new(BLOCK_SIZE, 2);
         let storage = Arc::new(Mutex::new(storage));
-        let writer = TestWriter::new(storage.clone());
+        let writer = TestStorage::new(storage.clone());
         let timestamp_provider = TestTimestampProvider;
-        let mut db: Db<BLOCK_SIZE, _, _> = Db::new(writer, timestamp_provider);
+        let mut db: Db<BLOCK_SIZE, _, _, _> = Db::new(writer, timestamp_provider);
 
         let test_key = "test_key";
         let test_val = 42u32;
@@ -128,9 +136,9 @@ mod test {
 
         let storage = TestBlockStorage::new(BLOCK_SIZE, 2);
         let storage = Arc::new(Mutex::new(storage));
-        let writer = TestWriter::new(storage.clone());
+        let writer = TestStorage::new(storage.clone());
         let timestamp_provider = TestTimestampProvider;
-        let mut db: Db<BLOCK_SIZE, _, _> = Db::new(writer, timestamp_provider);
+        let mut db: Db<BLOCK_SIZE, _, _, _> = Db::new(writer, timestamp_provider);
 
         let test_key = "e".repeat(32);
         let test_val = 42u32;
@@ -156,21 +164,37 @@ mod test {
         }
     }
 
-    struct TestWriter {
+    struct TestStorage {
         storage: Arc<Mutex<TestBlockStorage>>,
     }
 
-    impl TestWriter {
+    impl TestStorage {
         pub fn new(storage: Arc<Mutex<TestBlockStorage>>) -> Self {
             Self { storage }
         }
     }
 
-    impl DbWriter for TestWriter {
-        fn write_block(&mut self, block: &[u8]) -> Result<(), DbError> {
-            let mut storage = self.storage.lock().unwrap();
+    impl<const N: usize> Storage<N, TestStorageIter<N>> for TestStorage {
+        fn write_block(&mut self, bytes: &[u8]) -> Result<(), StorageError> {
+            let mut storage = self
+                .storage
+                .lock()
+                .map_err(|_| StorageError::WriteFail("lock error"))?;
+            storage.write_block(bytes)
+        }
 
-            storage.write_block(block)
+        fn block_iter(&mut self) -> Result<TestStorageIter<N>, StorageError> {
+            Ok(TestStorageIter::<N>)
+        }
+    }
+
+    struct TestStorageIter<const N: usize>;
+
+    impl<const N: usize> Iterator for TestStorageIter<N> {
+        type Item = StorageBlock<N>;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            todo!()
         }
     }
 
@@ -205,7 +229,7 @@ mod test {
             all_blocks
         }
 
-        fn write_block(&mut self, block: &[u8]) -> Result<(), DbError> {
+        fn write_block(&mut self, block: &[u8]) -> Result<(), StorageError> {
             let cur_block = &mut self.blocks[self.cur_block];
             self.cur_block += 1;
 

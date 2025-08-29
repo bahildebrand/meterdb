@@ -2,12 +2,13 @@
 
 mod block;
 mod db;
+mod storage;
 
 #[cfg(any(feature = "std", test))]
 pub use block::StdTimestamp;
 pub use block::Timestamp;
 pub use db::Db as MeterDb;
-pub use db::DbWriter as MeterDbWriter;
+pub use storage::Storage as MeterDbStorage;
 
 #[cfg(test)]
 extern crate std;
