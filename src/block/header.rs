@@ -1,4 +1,4 @@
-use crc_any::CRCu32;
+use crc_any::{CRCu8, CRCu32};
 use heapless::{CapacityError, Vec};
 use thiserror::Error;
 
@@ -12,25 +12,33 @@ const DIRTY_FLAGS: u8 = 0xFC;
 
 pub(crate) struct Header {
     magic: u16,
+    header_crc: u8,
     version: u8,
     flags: u8,
-    _reserved: u16,
+    _reserved: u8,
     pub seq: u16,
     pub len: u32,
-    crc32: u32,
+    body_crc: u32,
 }
 
 impl Header {
+    const HEADER_CRC_OFFSET: usize = 2;
+
     pub(crate) fn as_bytes(&self) -> Result<Vec<u8, HEADER_LEN>, HeaderError> {
         let mut header_bytes = Vec::new();
 
         header_bytes.extend_from_slice(self.magic.to_be_bytes().as_slice())?;
+        header_bytes.extend_from_slice(self.header_crc.to_be_bytes().as_slice())?;
         header_bytes.extend_from_slice(self.version.to_be_bytes().as_slice())?;
         header_bytes.extend_from_slice(self.flags.to_be_bytes().as_slice())?;
         header_bytes.extend_from_slice(self._reserved.to_be_bytes().as_slice())?;
         header_bytes.extend_from_slice(self.seq.to_be_bytes().as_slice())?;
         header_bytes.extend_from_slice(self.len.to_be_bytes().as_slice())?;
-        header_bytes.extend_from_slice(self.crc32.to_be_bytes().as_slice())?;
+        header_bytes.extend_from_slice(self.body_crc.to_be_bytes().as_slice())?;
+
+        let mut crc8 = CRCu8::crc8();
+        crc8.digest(&header_bytes[(Self::HEADER_CRC_OFFSET + 1)..]);
+        header_bytes[Self::HEADER_CRC_OFFSET] = crc8.get_crc();
 
         Ok(header_bytes)
     }
@@ -38,7 +46,7 @@ impl Header {
     pub(crate) fn calc_crc(&mut self, bytes: &[u8]) {
         let mut crc32 = CRCu32::crc32d();
         crc32.digest(bytes);
-        self.crc32 = crc32.get_crc();
+        self.body_crc = crc32.get_crc();
     }
 }
 
@@ -46,12 +54,13 @@ impl Default for Header {
     fn default() -> Self {
         Self {
             magic: MAGIC,
+            header_crc: 0,
             version: VERSION,
             flags: IN_USE_FLAGS,
             _reserved: 0,
             seq: 0,
             len: HEADER_LEN as u32,
-            crc32: 0,
+            body_crc: 0,
         }
     }
 }
@@ -129,18 +138,19 @@ mod tests {
     fn test_header_as_bytes() {
         let expected = [
             0xBE, 0xEF, // magic
+            0x02, // header_crc
             0x00, // version
             0xFE, // flags
-            0x00, 0x00, // _reserved
+            0x00, // _reserved
             0x00, 0x01, // seq
             0x00, 0x00, 0x04, 0x00, // len
-            0x00, 0x01, 0xE2, 0x40, // crc32
+            0x00, 0x01, 0xE2, 0x40, // body_crc
         ];
 
         let header = Header {
             seq: 1,
             len: 1024,
-            crc32: 123456,
+            body_crc: 123456,
             ..Default::default()
         };
         let bytes = header.as_bytes().unwrap();
@@ -153,6 +163,6 @@ mod tests {
         let mut header = Header::default();
         let data = b"hello world";
         header.calc_crc(data);
-        assert_eq!(header.crc32, 0x56C8F614);
+        assert_eq!(header.body_crc, 0x56C8F614);
     }
 }
