@@ -15,7 +15,7 @@ pub(crate) struct Header {
     version: u8,
     flags: u8,
     _reserved: u16,
-    seq: u16,
+    pub seq: u16,
     pub len: u32,
     crc32: u32,
 }

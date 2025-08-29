@@ -1,3 +1,5 @@
+use core::ops::AddAssign;
+
 use thiserror::Error;
 
 use crate::{
@@ -9,6 +11,7 @@ pub struct Db<const N: usize, W: DbWriter, T: Timestamp> {
     cur_block: Block<N>,
     writer: W,
     timestamp_provider: T,
+    seq: Sequence,
 }
 
 impl<const N: usize, W: DbWriter, T: Timestamp> Db<N, W, T> {
@@ -19,6 +22,7 @@ impl<const N: usize, W: DbWriter, T: Timestamp> Db<N, W, T> {
             cur_block,
             writer,
             timestamp_provider,
+            seq: Sequence::from(0),
         }
     }
 
@@ -37,9 +41,10 @@ impl<const N: usize, W: DbWriter, T: Timestamp> Db<N, W, T> {
     }
 
     pub fn flush(&mut self) -> Result<(), DbError> {
-        self.cur_block.write_header()?;
+        self.cur_block.write_header(self.seq.0)?;
         self.writer.write_block(self.cur_block.as_bytes())?;
         self.cur_block.reset();
+        self.seq += 1;
 
         Ok(())
     }
@@ -47,6 +52,29 @@ impl<const N: usize, W: DbWriter, T: Timestamp> Db<N, W, T> {
 
 pub trait DbWriter {
     fn write_block(&mut self, block: &[u8]) -> Result<(), DbError>;
+}
+
+struct Sequence(u16);
+
+impl Sequence {
+    #[allow(unused)]
+    fn is_in_sequence(&self, other: &Sequence) -> bool {
+        let next = self.0.overflowing_add(1).0;
+
+        next == other.0
+    }
+}
+
+impl AddAssign<u16> for Sequence {
+    fn add_assign(&mut self, rhs: u16) {
+        self.0 = self.0.overflowing_add(rhs).0;
+    }
+}
+
+impl From<u16> for Sequence {
+    fn from(value: u16) -> Self {
+        Self(value)
+    }
 }
 
 #[derive(Error, Debug)]
