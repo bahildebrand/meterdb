@@ -5,7 +5,7 @@ use heapless::Vec;
 use thiserror::Error;
 
 use crate::{
-    block::header::{HEADER_LEN, Header, HeaderError},
+    block::header::{HEADER_LEN, HeaderError},
     db::Sequence,
 };
 
@@ -15,20 +15,20 @@ mod time;
 
 pub use body::BlockValue;
 pub(crate) use body::{BlockBodyError, BlockEntry};
+pub(crate) use header::Header;
 #[cfg(any(feature = "std", test))]
 pub use time::StdTimestamp;
 pub use time::Timestamp;
 
 #[derive(Debug)]
 pub(crate) struct Block<const N: usize> {
-    header: Header,
+    pub(crate) header: Header,
     mem: [u8; N],
 }
 
 impl<const N: usize> Block<N> {
-    pub(crate) fn new() -> Self {
-        let header = Header::default();
-
+    #[cfg(test)]
+    pub(crate) fn new(header: Header) -> Self {
         Self {
             header,
             mem: [0xFF; N],
@@ -87,6 +87,15 @@ impl<const N: usize> Block<N> {
     }
 }
 
+impl<const N: usize> Default for Block<N> {
+    fn default() -> Self {
+        Self {
+            header: Default::default(),
+            mem: [0xFF; N],
+        }
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum BlockError {
     #[error("block has no room to insert key")]
@@ -113,7 +122,7 @@ mod test {
 
     #[test]
     fn test_add_reading() {
-        let mut block: Block<1024> = Block::new();
+        let mut block: Block<1024> = Block::default();
 
         assert_eq!(block.header.len as usize, HEADER_LEN);
 
@@ -132,7 +141,7 @@ mod test {
 
     #[test]
     fn test_add_reading_overflow() {
-        let mut block: Block<HEADER_LEN> = Block::new();
+        let mut block: Block<HEADER_LEN> = Block::default();
 
         let key = "test";
         let test_val = 42u32;
@@ -147,7 +156,7 @@ mod test {
     #[test]
     fn test_from_bytes_valid_empty_block() {
         // Create a valid empty block
-        let mut block: Block<64> = Block::new();
+        let mut block: Block<64> = Block::default();
         block.write_header(Sequence(123)).unwrap();
 
         let block_bytes = block.as_bytes();
@@ -163,7 +172,7 @@ mod test {
     #[test]
     fn test_from_bytes_valid_block_with_data() {
         // Create a block with some data
-        let mut block: Block<1024> = Block::new();
+        let mut block: Block<1024> = Block::default();
 
         let key = "temperature";
         let test_val = 255u32; // Use u32 instead of f32
@@ -189,7 +198,7 @@ mod test {
     #[test]
     fn test_from_bytes_invalid_crc() {
         // Create a valid block first
-        let mut block: Block<64> = Block::new();
+        let mut block: Block<64> = Block::default();
         block.write_header(Sequence(789)).unwrap();
 
         let block_bytes = block.as_bytes();
@@ -211,7 +220,7 @@ mod test {
     #[test]
     fn test_from_bytes_multiple_entries() {
         // Create a block with multiple entries
-        let mut block: Block<1024> = Block::new();
+        let mut block: Block<1024> = Block::default();
 
         // Add first entry
         let date_time1 = Utc.with_ymd_and_hms(2023, 1, 1, 10, 0, 0).unwrap();
