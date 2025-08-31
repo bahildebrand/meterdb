@@ -36,6 +36,27 @@ impl<const N: usize, T: Timestamp, I: Iterator<Item = StorageBlock<N>>, S: Stora
         }
     }
 
+    pub fn load(mut storage: S, timestamp_provider: T) -> Result<Db<N, S, T, I>, DbError> {
+        let mut block_iter = storage.block_iter()?;
+
+        let prev_block_raw = block_iter
+            .next()
+            .ok_or_else(|| StorageError::ReadFail("No first block read"))?;
+
+        let mut prev_block = Block::from_bytes(prev_block_raw.data)?;
+
+        for block_bytes in block_iter {
+            let block = Block::from_bytes(block_bytes.data)?;
+            if !prev_block.is_in_sequence(&block) {
+                // TODO: actually handle this
+            }
+
+            prev_block = block;
+        }
+
+        todo!()
+    }
+
     pub fn add_reading<V: Into<BlockValue>>(&mut self, key: &str, val: V) -> Result<(), DbError> {
         let date_time = self.timestamp_provider.now().map_err(DbError::Timestamp)?;
         let block_entry = BlockEntry::new(key, val, date_time)?;
@@ -51,7 +72,7 @@ impl<const N: usize, T: Timestamp, I: Iterator<Item = StorageBlock<N>>, S: Stora
     }
 
     pub fn flush(&mut self) -> Result<(), DbError> {
-        self.cur_block.write_header(self.seq.0)?;
+        self.cur_block.write_header(self.seq)?;
         self.storage.write_block(self.cur_block.as_bytes())?;
         self.cur_block.reset();
         self.seq += 1;
@@ -60,11 +81,12 @@ impl<const N: usize, T: Timestamp, I: Iterator<Item = StorageBlock<N>>, S: Stora
     }
 }
 
-struct Sequence(u16);
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub(crate) struct Sequence(pub u16);
 
 impl Sequence {
     #[allow(unused)]
-    fn is_in_sequence(&self, other: &Sequence) -> bool {
+    pub(crate) fn is_in_sequence(&self, other: &Sequence) -> bool {
         let next = self.0.overflowing_add(1).0;
 
         next == other.0
