@@ -55,30 +55,37 @@ impl Header {
     }
 
     pub(crate) fn from_bytes(bytes: &[u8; HEADER_LEN]) -> Result<Header, HeaderError> {
-        let mut header = Header::default();
-
-        header.magic = u16::from_be_bytes(bytes[0..Self::HEADER_CRC_OFFSET].try_into()?);
-        header.header_crc = bytes[Self::HEADER_CRC_OFFSET];
-        header.version = bytes[Self::VERSION_OFFSET];
-        header.flags = bytes[Self::FLAGS_OFFSET];
-        header._reserved = bytes[Self::RESERVED_OFFSET];
-        header.seq = Sequence(u16::from_be_bytes(
+        let magic = u16::from_be_bytes(bytes[0..Self::HEADER_CRC_OFFSET].try_into()?);
+        let header_crc = bytes[Self::HEADER_CRC_OFFSET];
+        let version = bytes[Self::VERSION_OFFSET];
+        let flags = bytes[Self::FLAGS_OFFSET];
+        let reserved = bytes[Self::RESERVED_OFFSET];
+        let seq = Sequence(u16::from_be_bytes(
             bytes[Self::SEQ_OFFSET..Self::LEN_OFFSET].try_into()?,
         ));
-        header.len = u32::from_be_bytes(bytes[Self::LEN_OFFSET..Self::BODY_CRC_OFFSET].try_into()?);
-        header.body_crc = u32::from_be_bytes(bytes[Self::BODY_CRC_OFFSET..HEADER_LEN].try_into()?);
+        let len = u32::from_be_bytes(bytes[Self::LEN_OFFSET..Self::BODY_CRC_OFFSET].try_into()?);
+        let body_crc = u32::from_be_bytes(bytes[Self::BODY_CRC_OFFSET..HEADER_LEN].try_into()?);
 
-        if header.magic != MAGIC {
-            return Err(HeaderError::InvalidMagic(header.magic));
+        if magic != MAGIC {
+            return Err(HeaderError::InvalidMagic(magic));
         }
 
         let mut crc8 = CRCu8::crc8();
         crc8.digest(&bytes[Header::VERSION_OFFSET..]);
-        if header.header_crc != crc8.get_crc() {
+        if header_crc != crc8.get_crc() {
             return Err(HeaderError::InvalidHeaderCrc);
         }
 
-        Ok(header)
+        Ok(Header {
+            magic,
+            header_crc,
+            version,
+            flags,
+            _reserved: reserved,
+            seq,
+            len,
+            body_crc,
+        })
     }
 
     pub(crate) fn calc_crc(&mut self, bytes: &[u8]) {

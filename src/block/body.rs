@@ -36,7 +36,7 @@ impl BlockEntry {
         val: T,
         date_time: DateTime<Utc>,
     ) -> Result<Self, BlockBodyError> {
-        let key_len = key_str.as_bytes().len();
+        let key_len = key_str.len();
         if key_len > MAX_KEY_SIZE {
             return Err(BlockBodyError::KeyTooLarge);
         }
