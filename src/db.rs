@@ -1,5 +1,6 @@
 use core::ops::{Add, AddAssign};
 
+use heapless::Vec;
 use thiserror::Error;
 
 use crate::{
@@ -20,6 +21,7 @@ where
     base_addr: usize,
     end_addr: usize,
     cur_addr: usize,
+    head_addr: usize,
 }
 
 impl<const N: usize, T: Timestamp, S: Storage<N>> Db<N, S, T> {
@@ -28,6 +30,7 @@ impl<const N: usize, T: Timestamp, S: Storage<N>> Db<N, S, T> {
         timestamp_provider: T,
         base_addr: usize,
         num_block: usize,
+        head_addr: usize,
     ) -> Db<N, S, T> {
         let cur_block = Block::default();
         let end_addr = num_block * N + base_addr;
@@ -41,6 +44,7 @@ impl<const N: usize, T: Timestamp, S: Storage<N>> Db<N, S, T> {
             base_addr,
             end_addr,
             cur_addr,
+            head_addr,
         }
     }
 
@@ -57,6 +61,7 @@ impl<const N: usize, T: Timestamp, S: Storage<N>> Db<N, S, T> {
         let block_iter = BlockIter::new(&mut storage, base_addr, end_addr);
 
         let mut prev_block: Option<(Block<N>, usize)> = None;
+        let mut head_addr = None;
         for storage_block in block_iter {
             let storage_block = storage_block?;
 
@@ -70,6 +75,9 @@ impl<const N: usize, T: Timestamp, S: Storage<N>> Db<N, S, T> {
                         }
                     }
 
+                    if head_addr.is_none() {
+                        head_addr = Some(storage_block.addr);
+                    }
                     prev_block = Some((block, storage_block.addr));
                 }
                 Err(_) => {
@@ -98,9 +106,16 @@ impl<const N: usize, T: Timestamp, S: Storage<N>> Db<N, S, T> {
                 base_addr,
                 end_addr,
                 cur_addr,
+                head_addr: head_addr.unwrap_or(base_addr),
             })
         } else {
-            Ok(Self::new(storage, timestamp_provider, base_addr, num_block))
+            Ok(Self::new(
+                storage,
+                timestamp_provider,
+                base_addr,
+                num_block,
+                base_addr,
+            ))
         }
     }
 
@@ -122,24 +137,35 @@ impl<const N: usize, T: Timestamp, S: Storage<N>> Db<N, S, T> {
         self.cur_block.write_header(self.seq)?;
         self.storage
             .write_block(self.cur_block.as_bytes(), self.cur_addr)?;
-        self.increment_addr();
+        self.cur_addr = self.next_addr(self.cur_addr);
         self.cur_block.reset();
         self.seq += 1;
 
         Ok(())
     }
 
-    fn increment_addr(&mut self) {
-        let next_addr = self.cur_addr.checked_add(N);
-        if let Some(addr) = next_addr {
-            if addr >= self.end_addr {
-                self.cur_addr = self.base_addr
-            } else {
-                self.cur_addr = addr;
-            }
-        } else {
-            self.cur_addr = self.base_addr;
+    pub fn export_block(&mut self) -> Result<Option<(Vec<u8, N>, usize)>, DbError> {
+        if self.head_addr == self.cur_addr {
+            return Ok(None);
         }
+
+        let block = self.storage.read_block(self.head_addr)?;
+        let addr = self.head_addr;
+        self.head_addr = self.next_addr(self.head_addr);
+
+        Ok(Some((block, addr)))
+    }
+
+    fn next_addr(&self, addr: usize) -> usize {
+        addr.checked_add(N)
+            .map(|a| {
+                if a >= self.end_addr {
+                    self.base_addr
+                } else {
+                    a
+                }
+            })
+            .unwrap_or(self.base_addr)
     }
 }
 
@@ -214,7 +240,7 @@ mod test {
         let storage = Arc::new(Mutex::new(storage));
         let writer = TestStorage::new(storage.clone());
         let timestamp_provider = TestTimestampProvider;
-        let mut db: Db<BLOCK_SIZE, _, _> = Db::new(writer, timestamp_provider, 0, 2);
+        let mut db: Db<BLOCK_SIZE, _, _> = Db::new(writer, timestamp_provider, 0, 2, 0);
 
         let test_key = "test_key";
         let test_val = 42u32;
@@ -234,7 +260,7 @@ mod test {
         let storage = Arc::new(Mutex::new(storage));
         let writer = TestStorage::new(storage.clone());
         let timestamp_provider = TestTimestampProvider;
-        let mut db: Db<BLOCK_SIZE, _, _> = Db::new(writer, timestamp_provider, 0, 2);
+        let mut db: Db<BLOCK_SIZE, _, _> = Db::new(writer, timestamp_provider, 0, 2, 0);
 
         let test_key = "e".repeat(32);
         let test_val = 42u32;
@@ -251,24 +277,24 @@ mod test {
     }
 
     #[rstest]
-    fn test_increment_addr() {
+    fn test_next_addr() {
         const BLOCK_SIZE: usize = 64;
         const NUM_BLOCKS: usize = 4;
         let storage = TestBlockStorage::new(NUM_BLOCKS);
         let storage = Arc::new(Mutex::new(storage));
         let writer = TestStorage::new(storage.clone());
         let timestamp_provider = TestTimestampProvider;
-        let mut db: Db<BLOCK_SIZE, _, _> = Db::new(writer, timestamp_provider, 0, NUM_BLOCKS);
+        let mut db: Db<BLOCK_SIZE, _, _> = Db::new(writer, timestamp_provider, 0, NUM_BLOCKS, 0);
 
         assert_eq!(db.cur_addr, 0);
 
         for i in 1..NUM_BLOCKS {
-            db.increment_addr();
+            db.cur_addr = db.next_addr(db.cur_addr);
             assert_eq!(db.cur_addr, i * BLOCK_SIZE);
         }
 
         // next increment should wrap around
-        db.increment_addr();
+        db.cur_addr = db.next_addr(db.cur_addr);
         assert_eq!(db.cur_addr, 0);
     }
 
@@ -334,6 +360,149 @@ mod test {
 
         assert_eq!(db.cur_addr, BASE_ADDR + 2 * BLOCK_SIZE);
         assert_eq!(db.seq, Sequence(2));
+    }
+
+    #[test]
+    fn test_export_block_empty_db() {
+        const BLOCK_SIZE: usize = 64;
+
+        let storage = TestBlockStorage::new(2);
+        let storage = Arc::new(Mutex::new(storage));
+        let writer = TestStorage::new(storage.clone());
+        let timestamp_provider = TestTimestampProvider;
+        let mut db: Db<BLOCK_SIZE, _, _> = Db::new(writer, timestamp_provider, 0, 2, 0);
+
+        // When head_addr equals cur_addr, there are no blocks to export
+        let result = db.export_block().unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_export_block_with_data() {
+        const BLOCK_SIZE: usize = 64;
+
+        let storage = TestBlockStorage::new(4);
+        let storage = Arc::new(Mutex::new(storage));
+        let writer = TestStorage::new(storage.clone());
+        let timestamp_provider = TestTimestampProvider;
+        let mut db: Db<BLOCK_SIZE, _, _> = Db::new(writer, timestamp_provider, 0, 4, 0);
+
+        let test_key = "test_key";
+        let test_val = 42u32;
+
+        // Add data and flush to create a block
+        db.add_reading(test_key, test_val).unwrap();
+        db.flush().unwrap();
+
+        // Now head_addr should be at 0 and cur_addr should be at BLOCK_SIZE
+        assert_eq!(db.head_addr, 0);
+        assert_eq!(db.cur_addr, BLOCK_SIZE);
+
+        // Export the block
+        let result = db.export_block().unwrap();
+        assert!(result.is_some());
+
+        let (block_data, addr) = result.unwrap();
+        assert_eq!(addr, 0); // The address of the exported block
+        assert_eq!(block_data.len(), BLOCK_SIZE);
+
+        // After export, head_addr should advance
+        assert_eq!(db.head_addr, BLOCK_SIZE);
+
+        // Exporting again should return None since head_addr == cur_addr
+        let result = db.export_block().unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_export_block_multiple_blocks() {
+        const BLOCK_SIZE: usize = 64;
+
+        let storage = TestBlockStorage::new(4);
+        let storage = Arc::new(Mutex::new(storage));
+        let writer = TestStorage::new(storage.clone());
+        let timestamp_provider = TestTimestampProvider;
+        let mut db: Db<BLOCK_SIZE, _, _> = Db::new(writer, timestamp_provider, 0, 4, 0);
+
+        let test_key = "test_key";
+        let test_val = 42u32;
+
+        // Add data and flush to create first block
+        db.add_reading(test_key, test_val).unwrap();
+        db.flush().unwrap();
+
+        // Add data and flush to create second block
+        db.add_reading(test_key, test_val).unwrap();
+        db.flush().unwrap();
+
+        // Now we should have two blocks to export
+        assert_eq!(db.head_addr, 0);
+        assert_eq!(db.cur_addr, BLOCK_SIZE * 2);
+
+        // Export first block
+        let result1 = db.export_block().unwrap();
+        assert!(result1.is_some());
+        let (_, addr1) = result1.unwrap();
+        assert_eq!(addr1, 0);
+        assert_eq!(db.head_addr, BLOCK_SIZE);
+
+        // Export second block
+        let result2 = db.export_block().unwrap();
+        assert!(result2.is_some());
+        let (_, addr2) = result2.unwrap();
+        assert_eq!(addr2, BLOCK_SIZE);
+        assert_eq!(db.head_addr, BLOCK_SIZE * 2);
+
+        // No more blocks to export
+        let result3 = db.export_block().unwrap();
+        assert_eq!(result3, None);
+    }
+
+    #[test]
+    fn test_export_block_circular_buffer() {
+        const BLOCK_SIZE: usize = 64;
+        const NUM_BLOCKS: usize = 3;
+
+        let storage = TestBlockStorage::new(NUM_BLOCKS);
+        let storage = Arc::new(Mutex::new(storage));
+        let writer = TestStorage::new(storage.clone());
+        let timestamp_provider = TestTimestampProvider;
+        let mut db: Db<BLOCK_SIZE, _, _> = Db::new(writer, timestamp_provider, 0, NUM_BLOCKS, 0);
+
+        let test_key = "test_key";
+        let test_val = 42u32;
+
+        // Fill all blocks
+        for _ in 0..NUM_BLOCKS {
+            db.add_reading(test_key, test_val).unwrap();
+            db.flush().unwrap();
+        }
+
+        // Current address should wrap around to 0
+        assert_eq!(db.cur_addr, 0);
+        assert_eq!(db.head_addr, 0);
+
+        // Add one more block, which should overwrite the first block
+        db.add_reading(test_key, test_val).unwrap();
+        db.flush().unwrap();
+
+        assert_eq!(db.cur_addr, BLOCK_SIZE);
+        assert_eq!(db.head_addr, 0);
+
+        // Export blocks - should get 2 blocks (the ones that weren't overwritten)
+        let result1 = db.export_block().unwrap();
+        assert!(result1.is_some());
+        let (_, addr1) = result1.unwrap();
+        assert_eq!(addr1, BLOCK_SIZE);
+
+        let result2 = db.export_block().unwrap();
+        assert!(result2.is_some());
+        let (_, addr2) = result2.unwrap();
+        assert_eq!(addr2, BLOCK_SIZE * 2);
+
+        // No more blocks to export
+        let result3 = db.export_block().unwrap();
+        assert_eq!(result3, None);
     }
 
     struct TestTimestampProvider;
